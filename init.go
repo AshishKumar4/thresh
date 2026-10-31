@@ -130,6 +130,16 @@ const initTemplate = `package thresh
 // 	}
 // }
 
+// near-copy: one sequence of steps has one owner. A Python function a diff
+// writes that shares at least containment of its winnowed fingerprints with
+// another function under paths is noted.
+// seams: "copies": {
+// 	kind:        "near-copy"
+// 	purpose:     "a sequence of steps written twice drifts apart"
+// 	paths:       ["src/*.py", "src/*/*.py", "tests/*.py"]
+// 	containment: 0.9
+// }
+
 // references-resolve: Go reaches into CUE by literal path (cue.Str/Def/Hid);
 // every such reference must resolve in the CUE files.
 // seams: "cue-go-binding": {

@@ -121,3 +121,10 @@ seams: traces: {
 	type:    "jax.profiler.*_trace"
 	onlyIn:  ["Profiler.*"]
 }
+
+seams: copies: {
+	kind:        "near-copy"
+	purpose:     "a sequence of steps written twice drifts apart"
+	paths:       ["pkg/*.py"]
+	containment: 0.9
+}

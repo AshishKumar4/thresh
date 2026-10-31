@@ -18,10 +18,31 @@ need not import or run.
      "normalized": "..."}                                            the module's AST without docstrings
 
 "ok" is false, the rest empty, where the source does not parse.
+
+Run with the argument `copies`, it reads a JSON list of sources instead and writes, for each, whether it
+parsed and its functions as a copy is read:
+
+    {"ok": bool, "funcs": [{"name": "Class.method", "line": n, "digest": "...", "prints": [n, ...]}, ...]}
+
+each module-level function and method of at least MIN_NODES syntax nodes, its body as tokens (every
+identifier one token, every constant its type, docstrings, imports, stubs and bare annotations aside), the
+digest of those tokens, and their winnowed fingerprints: each run of K tokens hashed, the least hash of
+each W runs in a row kept, so a copy with a statement changed, added or dropped keeps most of them.
 """
 import ast
+import hashlib
 import json
 import sys
+from itertools import pairwise
+
+MIN_NODES = 60
+"""A function of fewer syntax nodes is too short to call a copy: its steps are an idiom."""
+K, W = 30, 16
+"""The fingerprints: each K tokens in a row hashed, the least hash of each W hashes in a row kept."""
+DROPPED = {"ctx", "type_comment", "decorator_list", "returns", "annotation", "type_params", "kind"}
+"""Fields that hold no step: how a name is used, comments, decorators, annotations."""
+BODIES = ("body", "orelse", "finalbody")
+MODULUS, BASE = (1 << 61) - 1, 1_000_003
 
 
 def chain(node):
@@ -340,7 +361,134 @@ class Facts(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def docstring(statement):
+    return (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str))
+
+
+def declaration(statement, in_class):
+    """A docstring, an import, a stub (a function whose body is only `...` or `pass`), a bare annotation,
+    or a class's annotated field: no step."""
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        body = [line for line in statement.body if not docstring(line)]
+        return len(body) <= 1 and all(
+            isinstance(line, ast.Pass) or (isinstance(line, ast.Expr) and isinstance(line.value, ast.Constant)
+                                           and line.value.value is Ellipsis) for line in body)
+    if isinstance(statement, ast.AnnAssign):
+        return in_class or statement.value is None
+    return docstring(statement) or isinstance(statement, (ast.Import, ast.ImportFrom))
+
+
+def plain(statement):
+    """A valued annotated assignment as the assignment it is."""
+    if isinstance(statement, ast.AnnAssign) and statement.value is not None:
+        return ast.copy_location(ast.Assign(targets=[statement.target], value=statement.value), statement)
+    return statement
+
+
+def callee(statement):
+    """The function a statement that is only a call, or only names a call's result, calls, as written."""
+    if isinstance(statement, (ast.Expr, ast.Assign)) and isinstance(statement.value, ast.Call):
+        return ast.dump(statement.value.func)
+    return None
+
+
+def stepped(tree):
+    """`tree` rewritten in place to its steps: declarations dropped, valued annotations plain. Returns the
+    ids of the statements in runs of calls to one function, which declare data: their constants are read
+    as their values, so two tables of calls are not one copy."""
+    data = set()
+    for node in ast.walk(tree):
+        for field in BODIES:
+            statements = getattr(node, field, None)
+            if not (isinstance(statements, list) and statements and isinstance(statements[0], ast.stmt)):
+                continue
+            kept = [plain(statement) for statement in statements
+                    if not declaration(statement, isinstance(node, ast.ClassDef))]
+            setattr(node, field, kept)
+            for first, second in pairwise(kept):
+                if callee(first) is not None and callee(first) == callee(second):
+                    data.update((id(first), id(second)))
+    return data
+
+
+def tokens(node, out, data, declaring):
+    """`node` as tokens into `out`: its type and fields, every identifier "ID", every constant its type (None,
+    booleans and the ellipsis as themselves), or its value within a statement that declares data (its id in
+    `data`, or `declaring`). Returns its count of syntax nodes."""
+    out.append(type(node).__name__)
+    declaring = declaring or id(node) in data
+    count = 1
+    for field, value in ast.iter_fields(node):
+        if field in DROPPED:
+            continue
+        out.append(field)
+        if isinstance(node, ast.Constant) and field == "value":
+            literal = declaring or value is None or value is Ellipsis or isinstance(value, bool)
+            out.append(repr(value) if literal else type(value).__name__)
+        elif isinstance(value, ast.AST):
+            count += tokens(value, out, data, declaring)
+        elif isinstance(value, list):
+            out.append(f"[{len(value)}")
+            for item in value:
+                if isinstance(item, ast.AST):
+                    count += tokens(item, out, data, declaring)
+                else:
+                    out.append("ID" if isinstance(item, str) else repr(item))
+        else:
+            out.append("ID" if isinstance(value, str) else repr(value))
+    return count
+
+
+def fingerprints(stream):
+    """The least hash of each W in a row of the hashes of each K tokens in a row (all of them, under W)."""
+    codes = [int.from_bytes(hashlib.blake2b(token.encode(), digest_size=8).digest(), "big") % MODULUS
+             for token in stream]
+    if len(codes) < K:
+        return []
+    top = pow(BASE, K - 1, MODULUS)
+    grams, value = [], 0
+    for at, code in enumerate(codes):
+        if at >= K:
+            value = (value - codes[at - K] * top) % MODULUS
+        value = (value * BASE + code) % MODULUS
+        if at >= K - 1:
+            grams.append(value)
+    return sorted({min(grams[start:start + W]) for start in range(max(len(grams) - W + 1, 1))})
+
+
+def copies(source):
+    """Whether `source` parses, and each module-level function and method of at least MIN_NODES nodes, as a
+    copy is read."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return {"ok": False, "funcs": []}
+    data = stepped(tree)
+    found = []
+
+    def visit(node, scope, depth):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                stream, nodes = [], 0
+                for statement in child.body:
+                    nodes += tokens(statement, stream, data, False)
+                    stream.append(";")
+                if nodes >= MIN_NODES:
+                    found.append({"name": ".".join([*scope, child.name]), "line": child.lineno,
+                                  "digest": hashlib.sha256("\x1f".join(stream).encode()).hexdigest(),
+                                  "prints": fingerprints(stream)})
+            elif isinstance(child, ast.ClassDef) and depth < 2:
+                visit(child, [*scope, child.name], depth + 1)
+
+    visit(tree, [], 0)
+    return {"ok": True, "funcs": found}
+
+
 def main():
+    if sys.argv[1:] == ["copies"]:
+        json.dump([copies(source) for source in json.load(sys.stdin)], sys.stdout)
+        return
     source = sys.stdin.read()
     try:
         tree = ast.parse(source)

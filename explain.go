@@ -53,6 +53,12 @@ func obligation(s seam) string {
 			what = "entries of " + s.Entries
 		}
 		return fmt.Sprintf("the %s in %s are an intentional, enumerated set (%d declared). Adding one requires declaring why it belongs.", what, p, len(s.Declared))
+	case "near-copy":
+		share := s.Containment
+		if share == 0 {
+			share = nearCopyContainment
+		}
+		return fmt.Sprintf("in %s, one sequence of steps has one owner: a function you write anew (not renamed, moved, or with only a name, a constant, a comment or a docstring changed) that shares at least %.0f%% of the smaller one's winnowed fingerprints (those at most %d functions hold) with another function is noted. An exact copy of another is a duplicate checker's, not noted.", p, 100*share, nearCopyCommon)
 	case "references-resolve":
 		return fmt.Sprintf("Go files (%s) reach into CUE files (%s) by literal path; every such reference must resolve.", strings.Join(s.Go, ", "), strings.Join(s.Cue, ", "))
 	}

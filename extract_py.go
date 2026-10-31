@@ -81,6 +81,98 @@ func pyFacts(src string) *pyFile {
 	return &f
 }
 
+// pyCopy is one function as a copy is read: its body's digest and winnowed fingerprints (extract_py.py).
+type pyCopy struct {
+	Name   string  `json:"name"`
+	Line   int     `json:"line"`
+	Digest string  `json:"digest"`
+	Prints []int64 `json:"prints"`
+}
+
+// pyCopyFile is one source's functions as copies are read, and whether it parsed.
+type pyCopyFile struct {
+	OK    bool     `json:"ok"`
+	Funcs []pyCopy `json:"funcs"`
+}
+
+var (
+	copiesMemo     = map[[32]byte]pyCopyFile{}
+	copiesMemoLock sync.Mutex
+)
+
+// pyCopies reads each source's functions as a copy is read, the ones not read before in a single python3 run
+// (a tree's worth of sources is too many to start one interpreter each). nil where python3 cannot be run.
+func pyCopies(srcs []string) []pyCopyFile {
+	copiesMemoLock.Lock()
+	defer copiesMemoLock.Unlock()
+	keys := make([][32]byte, len(srcs))
+	var unread []string
+	var unreadKeys [][32]byte
+	queued := map[[32]byte]bool{}
+	for i, src := range srcs {
+		keys[i] = sha256.Sum256([]byte(src))
+		if _, ok := copiesMemo[keys[i]]; !ok && !queued[keys[i]] {
+			queued[keys[i]] = true
+			unread, unreadKeys = append(unread, src), append(unreadKeys, keys[i])
+		}
+	}
+	if len(unread) > 0 {
+		python := os.Getenv("THRESH_PYTHON")
+		if python == "" {
+			python = "python3"
+		}
+		in, _ := json.Marshal(unread)
+		cmd := exec.Command(python, "-c", pyScript, "copies")
+		cmd.Stdin = strings.NewReader(string(in))
+		out, err := cmd.Output()
+		var read []pyCopyFile
+		if err == nil {
+			err = json.Unmarshal(out, &read)
+		}
+		if err == nil && len(read) != len(unread) {
+			err = fmt.Errorf("read %d sources of %d", len(read), len(unread))
+		}
+		if err != nil {
+			pyWarned.Do(func() {
+				fmt.Fprintf(os.Stderr, "thresh: cannot run %s for Python files (%v); their seams stay silent\n", python, err)
+			})
+			return nil
+		}
+		for i, key := range unreadKeys {
+			copiesMemo[key] = read[i]
+		}
+	}
+	out := make([]pyCopyFile, len(srcs))
+	for i, key := range keys {
+		out[i] = copiesMemo[key]
+	}
+	return out
+}
+
+// pyCopyTree reads a tree's Python files (path -> source) as copies are read; false where python3 cannot be run.
+func pyCopyTree(files map[string]string) (copyTree, bool) {
+	var paths, srcs []string
+	for _, p := range sortedKeys(files) {
+		if isPython(p) {
+			paths, srcs = append(paths, p), append(srcs, files[p])
+		}
+	}
+	read := pyCopies(srcs)
+	if read == nil && len(srcs) > 0 {
+		return copyTree{}, false
+	}
+	tree := copyTree{Unread: map[string]bool{}}
+	for i, p := range paths {
+		if !read[i].OK {
+			tree.Unread[p] = true
+		}
+		for _, f := range read[i].Funcs {
+			tree.Funcs = append(tree.Funcs, copyFunc{p, f.Name, f.Line, f.Digest, f.Prints})
+		}
+	}
+	return tree, true
+}
+
 // pyUses lists the references to `name` or below it (`name.x`), with the function each sits in. `name`
 // may be a glob ("a.b.tcgen05_*"), matched against each dotted prefix of a use.
 func pyUses(src, name string) []pyUse {
