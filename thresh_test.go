@@ -16,6 +16,8 @@ var fixtureSeams = map[string]seam{
 	"kernel":         {Kind: "shared-kernel", Paths: []string{"kernel.cue"}, Consult: []string{"every consumer of #Kernel", "the Go binding"}},
 	"cue-module":     {Kind: "shared-kernel", Paths: []string{"cue.mod/module.cue"}},
 	"cue-dependency": {Kind: "shared-kernel", Paths: []string{"go.mod"}, Watch: []string{"cuelang.org/go"}},
+	"cue-uses":       {Kind: "shared-kernel", Paths: []string{"go.mod"}, Watch: []string{"cuelang.org/go"}, Added: true},
+	"verdict-out":    {Kind: "published-language", Paths: []string{"corpus/*.txtar"}, Format: "golden", Section: "out", Isolated: true},
 	"build":          {Kind: "choke-point", Paths: []string{"*.go"}, Type: "guarded", OnlyIn: []string{"Build"}},
 	"checks":         {Kind: "declared-set", Paths: []string{"bind.go"}, Funcs: "check*", Declared: map[string]string{"checkOne": "first", "checkTwo": "second"}},
 	"shapes":         {Kind: "declared-set", Paths: []string{"shapes.cue"}, Defs: "*#*", Declared: map[string]string{"#Shape": "shape", "#Edge": "edge"}},
@@ -413,6 +415,66 @@ func TestScenarios(t *testing.T) {
 			for _, w := range tc.want {
 				if !strings.Contains(got, w) {
 					t.Errorf("missing %q in:\n%s", w, got)
+				}
+			}
+		})
+	}
+}
+
+// TestQuietSeams: an isolated golden section is silent where an edit elsewhere in
+// its file leaves it unchanged, and loud as any where it moves; a watch on added
+// lines is silent where the change only removes a use, and loud where it adds one.
+func TestQuietSeams(t *testing.T) {
+	scenarios := []struct {
+		name          string
+		mutate        func(t *testing.T, dir string)
+		want, notWant []string
+	}{
+		{
+			"an input-only edit leaves an isolated section silent",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "corpus/tightened.txtar", "s: \"a\" | \"b\"", "s: \"a\" | \"c\"")
+			},
+			[]string{"[published-language: verdicts]"},
+			[]string{"[published-language: verdict-out]"},
+		},
+		{
+			"a moved recorded output is loud for an isolated section",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "corpus/tightened.txtar", "-- out --\nincompatible\n", "-- out --\ncompatible\n")
+			},
+			[]string{"[published-language: verdict-out]", "recorded output changed"},
+			nil,
+		},
+		{
+			"a removed use is silent for a watch on added lines",
+			func(t *testing.T, dir string) { replace(t, dir, "go.mod", "\tcuelang.org/go v0.5.0\n", "") },
+			[]string{"[shared-kernel: cue-dependency]"},
+			[]string{"[shared-kernel: cue-uses]"},
+		},
+		{
+			"an added use is loud for a watch on added lines",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "go.mod", "cuelang.org/go v0.5.0", "cuelang.org/go v0.11.0")
+			},
+			[]string{"[shared-kernel: cue-uses]", "cuelang.org/go v0.11.0"},
+			nil,
+		},
+	}
+	for _, tc := range scenarios {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := fixture(t)
+			tc.mutate(t, dir)
+			commitAll(t, dir, "change")
+			got := check(t, dir)
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("missing %q in:\n%s", w, got)
+				}
+			}
+			for _, w := range tc.notWant {
+				if strings.Contains(got, w) {
+					t.Errorf("unexpected %q in:\n%s", w, got)
 				}
 			}
 		})

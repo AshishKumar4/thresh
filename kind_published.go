@@ -64,6 +64,8 @@ func goldenChange(f changedFile, s seam) (string, string) {
 		return "note", fmt.Sprintf("format golden found no %q section in this file, so this seam cannot judge it. Check the seam's paths and section.", s.Section)
 	case f.Before == "" || !hadBefore:
 		return "note", fmt.Sprintf("contract grew: new recorded output%s.", hl)
+	case before == after && s.Isolated:
+		return "", "" // the edit was elsewhere in the file: another contract's, not this one's
 	case before == after:
 		return "note", "contract touched; recorded output unchanged."
 	case s.Headline && headline(before) != headline(after):

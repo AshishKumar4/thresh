@@ -30,6 +30,7 @@ seams: [string]: #Seam
 		format:    "golden" // the contract is recorded output, e.g. a checker's verdict corpus
 		section?:  string   // the txtar section holding the output; the whole file if absent
 		headline?: bool     // the output's first line is its headline: a moved headline is loud, other changes a note
+		isolated?: bool     // the section is a contract alone: an edit elsewhere in its file leaves it untouched, and silent
 	}
 }
 
@@ -40,6 +41,7 @@ seams: [string]: #Seam
 	paths:    [...string]
 	consult?: [...string] // who stands on this; repeated in the tap
 	watch?:   [...string] // if set, only changed lines containing one of these count
+	added?:   bool        // with watch: only lines the change adds count; a removed use leaves the dependency
 }
 
 // All construction of `type` goes through `onlyIn`. In a Python file, every use of

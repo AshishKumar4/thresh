@@ -98,6 +98,18 @@ func changedLines(cs *changeset, path string) []string {
 	return lines
 }
 
+// addedLines returns the lines the changeset adds to path, without their marker.
+func addedLines(cs *changeset, path string) []string {
+	out, _ := cs.git("diff", cs.diffspec, "--", path)
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+			lines = append(lines, l[1:])
+		}
+	}
+	return lines
+}
+
 // watched returns the changed lines containing any of the substrings.
 func watched(lines, subs []string) []string {
 	var hits []string

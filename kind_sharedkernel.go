@@ -18,7 +18,11 @@ func (sharedKernel) assess(name string, s seam, cs *changeset) []signal {
 		}
 		var what string
 		if len(s.Watch) > 0 {
-			hits := watched(changedLines(cs, f.Path), s.Watch)
+			lines := changedLines(cs, f.Path)
+			if s.Added {
+				lines = addedLines(cs, f.Path)
+			}
+			hits := watched(lines, s.Watch)
 			if len(hits) == 0 {
 				continue // the file changed, but not a watched line
 			}

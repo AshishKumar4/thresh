@@ -40,8 +40,10 @@ type seam struct {
 	Format   string            `json:"format"`   // published-language: compat extractor
 	Section  string            `json:"section"`  // published-language golden: txtar section holding the output
 	Headline bool              `json:"headline"` // published-language golden: first line of the output is its headline
+	Isolated bool              `json:"isolated"` // published-language golden: the section is a contract alone; an edit elsewhere in its file does not touch it
 	Consult  []string          `json:"consult"`  // shared-kernel: co-owners to consult
 	Watch    []string          `json:"watch"`    // shared-kernel: only changed lines containing these
+	Added    bool              `json:"added"`    // shared-kernel: only added lines count; a removed use leaves the dependency
 	Type     string            `json:"type"`     // choke-point: the guarded type
 	OnlyIn   []string          `json:"onlyIn"`   // choke-point: functions allowed to construct it
 	Funcs    string            `json:"funcs"`    // declared-set: glob on Go or Python function name

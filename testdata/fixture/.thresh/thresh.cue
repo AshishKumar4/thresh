@@ -30,6 +30,23 @@ seams: "cue-dependency": {
 	watch:   ["cuelang.org/go"]
 }
 
+seams: "cue-uses": {
+	kind:    "shared-kernel"
+	purpose: "a new use of the CUE implementation is a new consumer of it"
+	paths:   ["go.mod"]
+	watch:   ["cuelang.org/go"]
+	added:   true
+}
+
+seams: "verdict-out": {
+	kind:     "published-language"
+	purpose:  "each corpus case's recorded verdict is a contract of its own"
+	paths:    ["corpus/*.txtar"]
+	format:   "golden"
+	section:  "out"
+	isolated: true
+}
+
 seams: build: {
 	kind:    "choke-point"
 	purpose: "Build is where a guarded value's invariants are established"
