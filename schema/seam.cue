@@ -15,7 +15,7 @@ seams: [string]: #Seam
 // from it; thresh explain renders it under the seam.
 #Purpose: string & !=""
 
-#Seam: #PublishedLanguage | #SharedKernel | #ChokePoint | #DeclaredSet | #ReferencesResolve
+#Seam: #PublishedLanguage | #SharedKernel | #ChokePoint | #DeclaredSet | #ReferencesResolve | #NearCopy
 
 // A contract for consumers you cannot enumerate. You owe them compatibility, so
 // the tap is a compatibility verdict read from the format. Other formats
@@ -79,4 +79,14 @@ seams: [string]: #Seam
 	purpose: #Purpose
 	go:      [...string]
 	cue:     [...string]
+}
+
+// One sequence of steps has one owner. Over the Python files in paths, a
+// function the diff adds or changes whose winnowed fingerprints share at least
+// `containment` of the smaller's with another function there is noted.
+#NearCopy: {
+	kind:         "near-copy"
+	purpose:      #Purpose
+	paths:        [...string]
+	containment?: number & >0 & <=1 // 0.9 if absent
 }

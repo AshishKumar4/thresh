@@ -27,6 +27,7 @@ var fixtureSeams = map[string]seam{
 	"cells":          {Kind: "declared-set", Paths: []string{"pkg/cells.py"}, Entries: "CELLS", Declared: map[string]string{"decode": "decode", "prefill": "prefill"}},
 	"cell-funcs":     {Kind: "declared-set", Paths: []string{"pkg/cells.py"}, Funcs: "cell_*", Declared: map[string]string{"cell_decode": "decode", "cell_prefill": "prefill"}},
 	"routes":         {Kind: "declared-set", Paths: []string{"pkg/cells.py"}, Entries: "ROUTES", Declared: map[string]string{"(wgmma, forward)": "the port"}},
+	"copies":         {Kind: "near-copy", Paths: []string{"pkg/*.py"}, Containment: 0.9},
 }
 
 // Every kind has at least one loud scenario and one silence scenario. The
@@ -393,6 +394,73 @@ func TestScenarios(t *testing.T) {
 			[]string{"[declared-set: cell-funcs]", "undeclared element added: cell_verify"},
 		},
 		{
+			"a new function repeating another's steps is a note",
+			func(t *testing.T, dir string) {
+				write(t, dir, "pkg/report.py", "\"\"\"Reports.\"\"\"\n\n\ndef tally(lines, factor):\n    sums, peaks = [], []\n    for line in lines:\n        weighted = [item * factor for item in line]\n        sums.append(sum(weighted))\n        peaks.append(max(weighted) if weighted else 0.0)\n    bound = sum(sums) / max(len(sums), 1)\n    over = [at for at, value in enumerate(sums) if value < bound]\n    return {\"totals\": sums, \"largest\": peaks, \"past\": over}\n")
+			},
+			[]string{"[near-copy: copies] pkg/report.py note",
+				"tally (line 4) and summarize_before (pkg/legacy.py:4) share 92% of summarize_before's winnowed fingerprints (those at most 40 functions hold)"},
+		},
+		{
+			"a function edited into another's steps is a note",
+			func(t *testing.T, dir string) {
+				appendTo(t, dir, "pkg/steps.py", "\n\ndef tally(lines):\n    return sorted(lines)\n")
+				commitAll(t, dir, "a short tally")
+				replace(t, dir, "pkg/steps.py", "def tally(lines):\n    return sorted(lines)\n", "def tally(lines, factor):\n    sums, peaks = [], []\n    for line in lines:\n        weighted = [item * factor for item in line]\n        sums.append(sum(weighted))\n        peaks.append(max(weighted) if weighted else 0.0)\n    bound = sum(sums) / max(len(sums), 1)\n    over = [at for at, value in enumerate(sums) if value < bound]\n    return {\"totals\": sums, \"largest\": peaks, \"past\": over}\n")
+			},
+			[]string{"[near-copy: copies] pkg/steps.py note", "tally (line 16) and summarize_before (pkg/legacy.py:4) share 92%"},
+		},
+		{
+			"an identical copy is a duplicate checker's, not a near copy, near partners and all",
+			func(t *testing.T, dir string) {
+				write(t, dir, "pkg/report.py", "def tally(lines, factor):\n    sums, peaks = [], []\n    for line in lines:\n        weighted = [item * factor for item in line]\n        sums.append(sum(weighted))\n        peaks.append(max(weighted) if weighted else 0.0)\n    bound = sum(sums) / max(len(sums), 1)\n    over = [at for at, value in enumerate(sums) if value > bound]\n    return {\"totals\": sums, \"largest\": peaks, \"past\": over}\n")
+			},
+			nil,
+		},
+		{
+			"a file renamed with its near copy in it is not written anew",
+			func(t *testing.T, dir string) {
+				git(t, dir, "mv", "pkg/legacy.py", "pkg/older.py")
+			},
+			nil,
+		},
+		{
+			"repairing a file that did not parse claims no copy in it",
+			func(t *testing.T, dir string) {
+				appendTo(t, dir, "pkg/legacy.py", "\n\ndef broken(:\n    pass\n")
+				commitAll(t, dir, "broken")
+				replace(t, dir, "pkg/legacy.py", "\n\ndef broken(:\n    pass\n", "")
+			},
+			nil,
+		},
+		{
+			"an edit that leaves a copy's steps as they were is silent",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/steps.py", "def summarize(rows, scale):\n    \"\"\"Each row scaled,",
+					"def summarize_rows(table, scale):\n    \"\"\"Each of a table's rows scaled,")
+				replace(t, dir, "pkg/steps.py", "    for row in rows:\n        scaled = [value * scale for value in row]\n        totals.append(sum(scaled))\n        largest.append(max(scaled) if scaled else 0.0)\n    limit",
+					"    for row in table:\n        scaled = [value * scale for value in row]\n        totals.append(sum(scaled))\n        largest.append(max(scaled) if scaled else -1.0)  # an empty row\n    limit")
+			},
+			nil,
+		},
+		{
+			"a short function written twice is silent",
+			func(t *testing.T, dir string) {
+				write(t, dir, "pkg/report.py", "def first(rows):\n    return [row[0] for row in rows if row]\n\n\ndef head(lines):\n    return [line[0] for line in lines if line]\n")
+			},
+			nil,
+		},
+		{
+			"a new function unlike any other is silent",
+			func(t *testing.T, dir string) {
+				write(t, dir, "pkg/report.py", "def spread(points, width):\n    \"\"\"Points binned by width, each bin's count and its centre.\"\"\"\n"+
+					"    bins = {}\n    for point in points:\n        key = int(point // width)\n        bins.setdefault(key, []).append(point)\n"+
+					"    centres = {key: (key + 0.5) * width for key in bins}\n    counts = sorted((len(members), key) for key, members in bins.items())\n"+
+					"    while counts and counts[0][0] < 2:\n        counts.pop(0)\n    return [(centres[key], count) for count, key in counts], len(bins)\n")
+			},
+			nil,
+		},
+		{
 			"renamed CUE label breaks Go references, including an untouched file",
 			func(t *testing.T, dir string) {
 				replace(t, dir, "kernel.cue", "\tlenses: [...#Lens]", "\tlensList: [...#Lens]")
@@ -559,6 +627,17 @@ func TestInitScaffold(t *testing.T) {
 	}
 	if err := initRepo(dir); err == nil {
 		t.Fatal("expected init to refuse to overwrite an existing .thresh/")
+	}
+}
+
+// The near-copy seam's guidance states the tap's own predicate: the smaller one's
+// fingerprints, the idiom filter, and exact copies left to a duplicate checker.
+func TestNearCopyExplainStatesItsPredicate(t *testing.T) {
+	got := obligation(fixtureSeams["copies"])
+	for _, want := range []string{"write anew", "at least 90% of the smaller one's winnowed fingerprints", "(those at most 40 functions hold)", "An exact copy of another is a duplicate checker's"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
 	}
 }
 

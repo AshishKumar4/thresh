@@ -34,24 +34,25 @@ type signal struct {
 // seam is the union of every per-kind field. The embedded CUE schema (a per-kind
 // disjunction) enforces which fields apply to which kind, so Go just reads them.
 type seam struct {
-	Kind     string            `json:"kind"`
-	Purpose  string            `json:"purpose"` // every kind: why the seam exists
-	Paths    []string          `json:"paths"`
-	Format   string            `json:"format"`   // published-language: compat extractor
-	Section  string            `json:"section"`  // published-language golden: txtar section holding the output
-	Headline bool              `json:"headline"` // published-language golden: first line of the output is its headline
-	Isolated bool              `json:"isolated"` // published-language golden: the section is a contract alone; an edit elsewhere in its file does not touch it
-	Consult  []string          `json:"consult"`  // shared-kernel: co-owners to consult
-	Watch    []string          `json:"watch"`    // shared-kernel: only changed lines containing these
-	Added    bool              `json:"added"`    // shared-kernel: only added lines count; a removed use leaves the dependency
-	Type     string            `json:"type"`     // choke-point: the guarded type
-	OnlyIn   []string          `json:"onlyIn"`   // choke-point: functions allowed to construct it
-	Funcs    string            `json:"funcs"`    // declared-set: glob on Go or Python function name
-	Defs     string            `json:"defs"`     // declared-set: glob on CUE definition name
-	Entries  string            `json:"entries"`  // declared-set: a Python registry's name; its keys or elements
-	Declared map[string]string `json:"declared"` // declared-set: name -> reason it is Go-side
-	Go       []string          `json:"go"`       // references-resolve: Go files
-	Cue      []string          `json:"cue"`      // references-resolve: CUE files
+	Kind        string            `json:"kind"`
+	Purpose     string            `json:"purpose"` // every kind: why the seam exists
+	Paths       []string          `json:"paths"`
+	Format      string            `json:"format"`      // published-language: compat extractor
+	Section     string            `json:"section"`     // published-language golden: txtar section holding the output
+	Headline    bool              `json:"headline"`    // published-language golden: first line of the output is its headline
+	Isolated    bool              `json:"isolated"`    // published-language golden: the section is a contract alone; an edit elsewhere in its file does not touch it
+	Consult     []string          `json:"consult"`     // shared-kernel: co-owners to consult
+	Watch       []string          `json:"watch"`       // shared-kernel: only changed lines containing these
+	Added       bool              `json:"added"`       // shared-kernel: only added lines count; a removed use leaves the dependency
+	Type        string            `json:"type"`        // choke-point: the guarded type
+	OnlyIn      []string          `json:"onlyIn"`      // choke-point: functions allowed to construct it
+	Funcs       string            `json:"funcs"`       // declared-set: glob on Go or Python function name
+	Defs        string            `json:"defs"`        // declared-set: glob on CUE definition name
+	Entries     string            `json:"entries"`     // declared-set: a Python registry's name; its keys or elements
+	Containment float64           `json:"containment"` // near-copy: the share of fingerprints that taps; 0.9 if unset
+	Declared    map[string]string `json:"declared"`    // declared-set: name -> reason it is Go-side
+	Go          []string          `json:"go"`          // references-resolve: Go files
+	Cue         []string          `json:"cue"`         // references-resolve: CUE files
 }
 
 type config struct {
@@ -78,6 +79,7 @@ var kinds = map[string]kind{
 	"choke-point":        chokePoint{},
 	"declared-set":       declaredSet{},
 	"references-resolve": referencesResolve{},
+	"near-copy":          nearCopy{},
 }
 
 // --- Changeset: the tool's view of the diff, produced from git ------------------
