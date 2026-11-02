@@ -98,8 +98,8 @@ func changedLines(cs *changeset, path string) []string {
 	return lines
 }
 
-// addedLines returns the lines the changeset adds to path, without their marker.
-func addedLines(cs *changeset, path string) []string {
+// addedText returns the lines the changeset adds to path, without their marker.
+func addedText(cs *changeset, path string) []string {
 	out, _ := cs.git("diff", cs.diffspec, "--", path)
 	var lines []string
 	for _, l := range strings.Split(out, "\n") {

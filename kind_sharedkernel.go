@@ -20,7 +20,7 @@ func (sharedKernel) assess(name string, s seam, cs *changeset) []signal {
 		if len(s.Watch) > 0 {
 			lines := changedLines(cs, f.Path)
 			if s.Added {
-				lines = addedLines(cs, f.Path)
+				lines = addedText(cs, f.Path)
 			}
 			hits := watched(lines, s.Watch)
 			if len(hits) == 0 {
