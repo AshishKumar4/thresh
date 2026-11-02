@@ -73,6 +73,33 @@ func recordVerdict(path string, v verdictArgs) (string, error) {
 	}})
 }
 
+// deliverTaps records each tap (a full ID or a unique prefix of a sighted tap) as
+// delivered to session at its current message, as check --new records the taps it
+// reports: for taps a reader is given by another route, such as a review's brief.
+// It refuses an unknown or ambiguous tap and records none of them then.
+func deliverTaps(path, session, transcript string, refs []string) ([]string, error) {
+	if session == "" {
+		return nil, fmt.Errorf("deliver needs --session: who the taps reached")
+	}
+	evs, err := readEvents(path)
+	if err != nil {
+		return nil, err
+	}
+	taps := fold(evs)
+	var ids []string
+	var marks []event
+	for _, ref := range refs {
+		id, err := resolveTap(taps, ref)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		marks = append(marks, event{Ev: "delivered", Tap: id, Session: session, Transcript: transcript,
+			MsgHash: msgHash(taps[id].Message)})
+	}
+	return ids, appendEvents(path, marks)
+}
+
 // resolveTap accepts a full ID or a unique prefix of a sighted tap.
 func resolveTap(taps map[string]*tapState, ref string) (string, error) {
 	ref = strings.TrimPrefix(ref, "#")

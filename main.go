@@ -26,6 +26,7 @@ type options struct {
 	useful     string
 	evidence   string
 	inaccurate bool
+	taps       []string // deliver: every positional argument
 }
 
 func main() {
@@ -63,6 +64,7 @@ func main() {
 			o.inaccurate = true
 		default:
 			o.pos = args[i]
+			o.taps = append(o.taps, args[i])
 		}
 	}
 
@@ -72,7 +74,7 @@ func main() {
 			fail(err)
 		}
 		return
-	case "verdict", "pending", "stats":
+	case "verdict", "pending", "stats", "deliver":
 		if err := review(cmd, o, os.Stdout); err != nil {
 			fail(err)
 		}
@@ -180,6 +182,13 @@ func review(cmd string, o options, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if cmd == "deliver" {
+		ids, err := deliverTaps(path, o.session, o.transcript, o.taps)
+		if err == nil {
+			fmt.Fprintf(stdout, "delivered %d taps to %s\n", len(ids), o.session)
+		}
+		return err
+	}
 	if cmd == "verdict" {
 		id, err := recordVerdict(path, verdictArgs{tap: o.pos, by: o.by, useful: o.useful,
 			evidence: o.evidence, session: o.session, inaccurate: o.inaccurate})
@@ -224,6 +233,9 @@ tap log ($THRESH_LOG, default $XDG_STATE_HOME/thresh/taps.jsonl):
   thresh verdict ID --by origin|sweep|human (--useful yes|no|unclear | --inaccurate) --evidence TEXT
                                               record whether a tap helped
   thresh pending [--repo DIR] [--json]        taps nobody has given a verdict on
+  thresh deliver ID... --session ID [--transcript PATH]
+                                              record that these taps reached a reader by another route
+                                              (a review's brief), as check --new records its own
   thresh stats [--json]                       taps and verdicts by kind, repo and seam
 `)
 	os.Exit(2)

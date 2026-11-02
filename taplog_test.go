@@ -183,6 +183,36 @@ func TestDelivery(t *testing.T) {
 	}
 }
 
+// TestDeliverByAnotherRoute: taps a review's brief carries are recorded delivered to
+// its session, and counted delivered in the stats, as check --new's are; an unknown
+// tap, or no session, records nothing.
+func TestDeliverByAnotherRoute(t *testing.T) {
+	path := logTo(t)
+	seed(t, path, sighting("abc111", "r", "choke-point"), sighting("abc222", "r", "shared-kernel"))
+	if _, err := deliverTaps(path, "", "", []string{"abc111"}); err == nil {
+		t.Fatal("a delivery with no session should be refused")
+	}
+	if _, err := deliverTaps(path, "review:train-1", "", []string{"abc111", "fff"}); err == nil {
+		t.Fatal("an unknown tap should refuse the delivery")
+	}
+	if got := fold(mustRead(t, path))["abc111"].delivered; len(got) != 0 {
+		t.Fatalf("a refused delivery recorded %v", got)
+	}
+	ids, err := deliverTaps(path, "review:train-1", "brief-1.md", []string{"#abc1", "abc222"})
+	if err != nil || strings.Join(ids, ",") != "abc111,abc222" {
+		t.Fatalf("delivered %v, %v", ids, err)
+	}
+	taps := fold(mustRead(t, path))
+	if taps["abc111"].delivered["review:train-1"] != msgHash(taps["abc111"].Message) {
+		t.Fatalf("delivery not at the tap's message: %v", taps["abc111"].delivered)
+	}
+	for _, r := range computeStats(taps).ByKind {
+		if r.Delivered != r.Taps {
+			t.Fatalf("stats count %d of %d taps delivered for %s", r.Delivered, r.Taps, r.Group)
+		}
+	}
+}
+
 func TestVerdict(t *testing.T) {
 	path := logTo(t)
 	seed(t, path, sighting("abc111", "r", "choke-point"), sighting("abc222", "r", "choke-point"))
