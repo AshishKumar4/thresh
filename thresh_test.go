@@ -33,6 +33,18 @@ var fixtureSeams = map[string]seam{
 // Every kind has at least one loud scenario and one silence scenario. The
 // silence scenarios are not optional: a kind you can't picture staying quiet is
 // one nobody would leave switched on. Each scenario runs on a fresh fixture repo.
+// TestMain keeps every test's readings of copies in a directory of the run's own, never the user's cache.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "thresh-cache-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("THRESH_CACHE", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 func TestScenarios(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -486,6 +498,29 @@ func TestScenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestNearCopyReadsAreKeptAcrossRuns: a source's reading as copies is kept by its content and the
+// extractor's (copiesStore), so a later run reads only what changed: one whose Python cannot run taps
+// alike from what an earlier run read (2026-11-09: each pre-push check of nine files read Dew's whole
+// Python tree again, 24 s of its 26).
+func TestNearCopyReadsAreKeptAcrossRuns(t *testing.T) {
+	t.Setenv("THRESH_CACHE", t.TempDir())
+	dir := fixture(t)
+	write(t, dir, "pkg/report.py", "\"\"\"Reports.\"\"\"\n\n\ndef tally(lines, factor):\n    sums, peaks = [], []\n    for line in lines:\n        weighted = [item * factor for item in line]\n        sums.append(sum(weighted))\n        peaks.append(max(weighted) if weighted else 0.0)\n    bound = sum(sums) / max(len(sums), 1)\n    over = [at for at, value in enumerate(sums) if value < bound]\n    return {\"totals\": sums, \"largest\": peaks, \"past\": over}\n")
+	commitAll(t, dir, "change")
+	first := check(t, dir)
+	if !strings.Contains(first, "[near-copy: copies] pkg/report.py note") {
+		t.Fatalf("the first run taps no near copy:\n%s", first)
+	}
+	// A run of its own: nothing read in this process, and no Python to read with.
+	copiesMemoLock.Lock()
+	copiesMemo = map[[32]byte]pyCopyFile{}
+	copiesMemoLock.Unlock()
+	t.Setenv("THRESH_PYTHON", "/bin/false")
+	if again := check(t, dir); again != first {
+		t.Fatalf("a later run taps otherwise:\n%s\nnot\n%s", again, first)
 	}
 }
 
