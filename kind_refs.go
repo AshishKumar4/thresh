@@ -20,8 +20,9 @@ func (referencesResolve) assess(name string, s seam, cs *changeset) []signal {
 	now := cueLabels(cs.current(s.Cue))
 	base := cueLabels(cs.atBase(s.Cue))
 	var out []signal
-	for _, path := range sortedKeys(cs.current(s.Go)) {
-		src := cs.current([]string{path})[path]
+	sources := cs.current(s.Go)
+	for _, path := range sortedKeys(sources) {
+		src := sources[path]
 		var changed map[int]bool
 		if cs.touchedAny([]string{path}) {
 			changed = cs.file(path).Changed

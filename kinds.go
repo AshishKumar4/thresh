@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -215,6 +219,7 @@ func (cs *changeset) contentAt(globs []string, ref string) map[string]string {
 		}
 		list, _ = cs.git("ls-tree", "-r", "--name-only", ref)
 	}
+	var wanted []string
 	for _, p := range strings.Split(strings.TrimSpace(list), "\n") {
 		if p == "" || !matchAny(globs, p) {
 			continue
@@ -223,8 +228,54 @@ func (cs *changeset) contentAt(globs []string, ref string) map[string]string {
 			b, _ := os.ReadFile(filepath.Join(cs.repo, p))
 			out[p] = string(b)
 		} else {
-			out[p], _ = cs.git("show", ref+":"+p)
+			wanted = append(wanted, p)
 		}
+	}
+	for p, text := range cs.blobs(ref, wanted) {
+		out[p] = text
+	}
+	return out
+}
+
+// blobs reads each of paths as ref holds it, in one git process (cat-file --batch) rather than one
+// `git show` a file: a kind that reads the whole tree reads thousands of files, and a process each
+// held a nine-file range's check past the pre-push hook's 20 s (3,670 of them, 22 s, 2026-11-09). A
+// path ref does not hold is left out, as `git show` failing left it empty.
+func (cs *changeset) blobs(ref string, paths []string) map[string]string {
+	out := map[string]string{}
+	if len(paths) == 0 {
+		return out
+	}
+	var names bytes.Buffer
+	for _, p := range paths {
+		fmt.Fprintf(&names, "%s:%s\n", ref, p)
+	}
+	cmd := exec.Command("git", "-C", cs.repo, "cat-file", "--batch")
+	cmd.Stdin = &names
+	raw, err := cmd.Output()
+	if err != nil {
+		return out
+	}
+	read := bufio.NewReader(bytes.NewReader(raw))
+	for _, p := range paths {
+		header, err := read.ReadString('\n')
+		if err != nil {
+			return out
+		}
+		// "<object> <type> <size>", or "<name> missing" for a path ref does not hold.
+		fields := strings.Fields(header)
+		if len(fields) != 3 || fields[2] == "missing" {
+			continue
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return out
+		}
+		body := make([]byte, size+1) // its content and the newline after it
+		if _, err := io.ReadFull(read, body); err != nil {
+			return out
+		}
+		out[p] = string(body[:size])
 	}
 	return out
 }
