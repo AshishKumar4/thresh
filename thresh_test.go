@@ -507,6 +507,12 @@ func TestScenarios(t *testing.T) {
 // Python tree again, 24 s of its 26).
 func TestNearCopyReadsAreKeptAcrossRuns(t *testing.T) {
 	t.Setenv("THRESH_CACHE", t.TempDir())
+	forget := func() { // a run of its own: nothing read in this process
+		copiesMemoLock.Lock()
+		copiesMemo = map[[32]byte]pyCopyFile{}
+		copiesMemoLock.Unlock()
+	}
+	forget()
 	dir := fixture(t)
 	write(t, dir, "pkg/report.py", "\"\"\"Reports.\"\"\"\n\n\ndef tally(lines, factor):\n    sums, peaks = [], []\n    for line in lines:\n        weighted = [item * factor for item in line]\n        sums.append(sum(weighted))\n        peaks.append(max(weighted) if weighted else 0.0)\n    bound = sum(sums) / max(len(sums), 1)\n    over = [at for at, value in enumerate(sums) if value < bound]\n    return {\"totals\": sums, \"largest\": peaks, \"past\": over}\n")
 	commitAll(t, dir, "change")
@@ -514,10 +520,8 @@ func TestNearCopyReadsAreKeptAcrossRuns(t *testing.T) {
 	if !strings.Contains(first, "[near-copy: copies] pkg/report.py note") {
 		t.Fatalf("the first run taps no near copy:\n%s", first)
 	}
-	// A run of its own: nothing read in this process, and no Python to read with.
-	copiesMemoLock.Lock()
-	copiesMemo = map[[32]byte]pyCopyFile{}
-	copiesMemoLock.Unlock()
+	// Another run, with no Python to read with.
+	forget()
 	t.Setenv("THRESH_PYTHON", "/bin/false")
 	if again := check(t, dir); again != first {
 		t.Fatalf("a later run taps otherwise:\n%s\nnot\n%s", again, first)
