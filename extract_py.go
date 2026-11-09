@@ -6,6 +6,7 @@ package main
 import (
 	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 //go:embed extract_py.py
@@ -100,21 +102,96 @@ var (
 	copiesMemoLock sync.Mutex
 )
 
-// pyCopies reads each source's functions as a copy is read, the ones not read before in a single python3 run
-// (a tree's worth of sources is too many to start one interpreter each). nil where python3 cannot be run.
+// copiesStore is the directory a source's reading as copies is kept in across runs (`pyCopies`):
+// $THRESH_CACHE's copies/, else the user's cache directory's thresh/copies/; "" where there is none,
+// and nothing is kept. Each check is a process of its own, and a tree's thousands of Python files
+// read again every run held a pre-push hook's check of nine files past its 20 s (24 s of 26 on Dew,
+// 2026-11-09). An entry no run has read for a while is its keeper's to remove (by its mtime, which a
+// read moves).
+func copiesStore() string {
+	if dir := os.Getenv("THRESH_CACHE"); dir != "" {
+		return filepath.Join(dir, "copies")
+	}
+	if dir, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(dir, "thresh", "copies")
+	}
+	return ""
+}
+
+// copiesKey is a source's key as copies are read: its content's and the extractor's, so an extractor
+// that reads otherwise reads every source again.
+func copiesKey(src string) [32]byte {
+	h := sha256.New()
+	h.Write([]byte(pyScript))
+	h.Write([]byte{0})
+	h.Write([]byte(src))
+	var key [32]byte
+	copy(key[:], h.Sum(nil))
+	return key
+}
+
+// kept reads the reading `copiesStore` keeps under key, its mtime moved to now; false where it keeps none.
+func kept(store string, key [32]byte) (pyCopyFile, bool) {
+	var f pyCopyFile
+	if store == "" {
+		return f, false
+	}
+	path := filepath.Join(store, hex.EncodeToString(key[:])+".json")
+	b, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(b, &f) != nil {
+		return f, false
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+	return f, true
+}
+
+// keep writes a reading to `copiesStore` under key, whole (a temporary file renamed), so a run reading it
+// at once finds the old entry or the new; a write that fails keeps nothing.
+func keep(store string, key [32]byte, f pyCopyFile) {
+	if store == "" || os.MkdirAll(store, 0o755) != nil {
+		return
+	}
+	b, err := json.Marshal(f)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(store, hex.EncodeToString(key[:])+".json")
+	temporary, err := os.CreateTemp(store, ".keep-*")
+	if err != nil {
+		return
+	}
+	_, err = temporary.Write(b)
+	if closed := temporary.Close(); err == nil && closed == nil {
+		err = os.Rename(temporary.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(temporary.Name())
+	}
+}
+
+// pyCopies reads each source's functions as a copy is read: those this run or an earlier one read
+// (`copiesStore`) from what they kept, the rest in a single python3 run (a tree's worth of sources is too
+// many to start one interpreter each). nil where python3 cannot be run.
 func pyCopies(srcs []string) []pyCopyFile {
 	copiesMemoLock.Lock()
 	defer copiesMemoLock.Unlock()
+	store := copiesStore()
 	keys := make([][32]byte, len(srcs))
 	var unread []string
 	var unreadKeys [][32]byte
 	queued := map[[32]byte]bool{}
 	for i, src := range srcs {
-		keys[i] = sha256.Sum256([]byte(src))
-		if _, ok := copiesMemo[keys[i]]; !ok && !queued[keys[i]] {
-			queued[keys[i]] = true
-			unread, unreadKeys = append(unread, src), append(unreadKeys, keys[i])
+		keys[i] = copiesKey(src)
+		if _, ok := copiesMemo[keys[i]]; ok || queued[keys[i]] {
+			continue
 		}
+		if f, ok := kept(store, keys[i]); ok {
+			copiesMemo[keys[i]] = f
+			continue
+		}
+		queued[keys[i]] = true
+		unread, unreadKeys = append(unread, src), append(unreadKeys, keys[i])
 	}
 	if len(unread) > 0 {
 		python := os.Getenv("THRESH_PYTHON")
@@ -140,6 +217,7 @@ func pyCopies(srcs []string) []pyCopyFile {
 		}
 		for i, key := range unreadKeys {
 			copiesMemo[key] = read[i]
+			keep(store, key, read[i])
 		}
 	}
 	out := make([]pyCopyFile, len(srcs))
