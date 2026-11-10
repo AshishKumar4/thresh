@@ -399,6 +399,22 @@ func TestScenarios(t *testing.T) {
 			[]string{"[declared-set: routes]", "undeclared element added: (mma, None)"},
 		},
 		{
+			"an undeclared registry entry keyed by an object's constructor is loud, named as written",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/cells.py", "    (\"wgmma\", \"forward\"): \"the port\",\n",
+					"    (\"wgmma\", \"forward\"): \"the port\",\n    (MMA,  Kind(True, made = Made.FORWARD)): \"an object's\",\n")
+			},
+			[]string{"[declared-set: routes]", "undeclared element added: (MMA, Kind(True, made=Made.FORWARD))"},
+		},
+		{
+			"a registry entry thresh cannot name is loud, never dropped",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/cells.py", "    (\"wgmma\", \"forward\"): \"the port\",\n",
+					"    (\"wgmma\", \"forward\"): \"the port\",\n    (\"mma\", made()[0]): \"computed\",\n")
+			},
+			[]string{"[declared-set: routes]", "cannot be named"},
+		},
+		{
 			"an undeclared Python function in a declared set is loud",
 			func(t *testing.T, dir string) {
 				appendTo(t, dir, "pkg/cells.py", "\n\ndef cell_verify():\n    return 3\n")
