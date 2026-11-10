@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // declared-set: a set of code elements that is intentional and enumerated. The
@@ -36,14 +37,30 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 			continue
 		}
 		before := map[string]bool{}
+		unnamedBefore := 0
 		for _, e := range was {
-			if in(e) {
+			if e.name == "" {
+				unnamedBefore++
+			} else if in(e) {
 				before[e.name] = true
 			}
 		}
+		// A registry entry whose key the program computes cannot be named, so the set cannot be compared at
+		// it: more of them than before is said, never passed over.
+		var unnamed []string
+		for _, e := range now {
+			if e.name == "" {
+				unnamed = append(unnamed, fmt.Sprint(e.line))
+			}
+		}
+		if len(unnamed) > unnamedBefore {
+			out = append(out, signal{Kind: s.Kind, Seam: name, File: f.Path, Level: "step-back",
+				Message: fmt.Sprintf("registry entries whose keys cannot be named (lines %s): a declared set reads a key written as a constant, a dotted name, a tuple of them, or a call of a dotted name on them; this set cannot see what such an entry adds.",
+					strings.Join(unnamed, ", "))})
+		}
 		after := map[string]bool{}
 		for _, e := range now {
-			if !in(e) {
+			if e.name == "" || !in(e) {
 				continue
 			}
 			after[e.name] = true
