@@ -429,6 +429,17 @@ func TestScenarios(t *testing.T) {
 			[]string{"[declared-set: cells]", "undeclared element added: Kind(True)"},
 		},
 		{
+			"a constructed key is never a string spelled as its identity",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/cells.py", "    \"prefill\": \"the prefill cell\",\n",
+					"    \"prefill\": \"the prefill cell\",\n    \"constructed:Kind(True)\": \"a string\",\n")
+				commitAll(t, dir, "a string key")
+				replace(t, dir, "pkg/cells.py", "    \"constructed:Kind(True)\": \"a string\",\n",
+					"    \"constructed:Kind(True)\": \"a string\",\n    Kind(True): \"an object\",\n")
+			},
+			[]string{"[declared-set: cells]", "undeclared element added: Kind(True)"},
+		},
+		{
 			"an empty string is a key like any other",
 			func(t *testing.T, dir string) {
 				replace(t, dir, "pkg/cells.py", "    \"prefill\": \"the prefill cell\",\n",
