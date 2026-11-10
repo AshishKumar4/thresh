@@ -407,6 +407,36 @@ func TestScenarios(t *testing.T) {
 			[]string{"[declared-set: routes]", "undeclared element added: (MMA, Kind(True, made=Made.FORWARD))"},
 		},
 		{
+			"a constructed key whose arguments split differently is another key",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/cells.py", "    (\"wgmma\", \"forward\"): \"the port\",\n",
+					"    (\"wgmma\", \"forward\"): \"the port\",\n    Kind(\"a, b\"): \"one\",\n")
+				commitAll(t, dir, "one constructed key")
+				replace(t, dir, "pkg/cells.py", "    Kind(\"a, b\"): \"one\",\n",
+					"    Kind(\"a, b\"): \"one\",\n    Kind(\"a\", \"b\"): \"two\",\n")
+			},
+			[]string{"undeclared element added: Kind('a', 'b')"},
+		},
+		{
+			"a constructed key is never the string that reads as it",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/cells.py", "    \"prefill\": \"the prefill cell\",\n",
+					"    \"prefill\": \"the prefill cell\",\n    \"Kind(True)\": \"a string\",\n")
+				commitAll(t, dir, "a string key")
+				replace(t, dir, "pkg/cells.py", "    \"Kind(True)\": \"a string\",\n",
+					"    \"Kind(True)\": \"a string\",\n    Kind(True): \"an object\",\n")
+			},
+			[]string{"[declared-set: cells]", "undeclared element added: Kind(True)"},
+		},
+		{
+			"an empty string is a key like any other",
+			func(t *testing.T, dir string) {
+				replace(t, dir, "pkg/cells.py", "    \"prefill\": \"the prefill cell\",\n",
+					"    \"prefill\": \"the prefill cell\",\n    \"\": \"the empty cell\",\n")
+			},
+			[]string{"[declared-set: cells]", "undeclared element added:  (line"},
+		},
+		{
 			"a registry entry thresh cannot name is loud, never dropped",
 			func(t *testing.T, dir string) {
 				replace(t, dir, "pkg/cells.py", "    (\"wgmma\", \"forward\"): \"the port\",\n",
