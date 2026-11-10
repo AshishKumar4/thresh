@@ -36,7 +36,7 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 			fmt.Fprintf(os.Stderr, "thresh: %s cannot be read on one side of the diff (it does not parse, or python3 cannot run); seam %s does not compare its set there\n", f.Path, name)
 			continue
 		}
-		before := map[string]bool{}
+		before := map[identity]bool{}
 		unnamedBefore := 0
 		for _, e := range was {
 			if !e.named {
@@ -58,7 +58,7 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 				Message: fmt.Sprintf("registry entries whose keys cannot be named (lines %s): a declared set reads a key written as a constant, a dotted name, a tuple of them, or a call of a dotted name on them; this set cannot see what such an entry adds.",
 					strings.Join(unnamed, ", "))})
 		}
-		after := map[string]bool{}
+		after := map[identity]bool{}
 		for _, e := range now {
 			if !e.named || !in(e) {
 				continue
@@ -71,7 +71,7 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 			}
 		}
 		for _, d := range sortedKeys(s.Declared) {
-			plain, built := element{name: d}.identity(), element{name: d, constructed: true}.identity()
+			plain, built := identity{d, false}, identity{d, true}
 			// A declaration names one entry: a string and a constructed key that read alike are two.
 			if after[plain] && after[built] && !(before[plain] && before[built]) {
 				out = append(out, signal{Kind: s.Kind, Seam: name, File: f.Path, Level: "step-back",
@@ -94,13 +94,13 @@ type element struct {
 }
 
 // identity is what a set compares an element by: its name, and for a registry key whether it is constructed,
-// so a string that reads as a constructed key is another key.
-func (e element) identity() string {
-	if e.constructed {
-		return "constructed:" + e.name
-	}
-	return e.name
+// so a string that reads as a constructed key, or spells this, is another key.
+type identity struct {
+	name        string
+	constructed bool
 }
+
+func (e element) identity() identity { return identity{e.name, e.constructed} }
 
 // The element extractors return a source's elements and whether it was read: a
 // set is compared only where both sides were. Go and CUE sources read as empty
