@@ -11,7 +11,7 @@ need not import or run.
          the class is defined, a default or a decorator where its function is; a function's annotations are
          its own);
          an absolute import statement is a use of each name it imports
-     "registries": {"NAME": [{"key": "k", "line": n}, ...], ...},  (key "": a computed key, unnamed)
+     "registries": {"NAME": [{"key": "k", "line": n}, ...], ...},  (named false: a computed key)
          each module-level dict, set, list or tuple literal (or dict(...) call) bound to a name, and each
          module-level `NAME[k] = ...`: its keys or elements, constants, dotted names and tuples of them
          ("(a, b)")
@@ -184,23 +184,30 @@ def module_bindings(body, module=False):
     return {**named, **imported}
 
 
-def key_of(node):
+def key_of(node, within_call=False):
     """A registry key or element: a string or number constant's value, None as "None", a dotted name, a tuple
     of them as "(a, b)", or a call of a dotted name with them as its arguments, an object constructed from its
-    parts, as "Kind(a, made=Made.FORWARD)": positional arguments, then keywords as written; None for anything
-    else, a key computed by the program."""
+    parts, as "Kind('a', made=Made.FORWARD)": positional arguments, then keywords as written, a string among
+    them quoted so its commas never read as another argument's; None for anything else, a key computed by the
+    program."""
     if isinstance(node, ast.Constant) and (node.value is None or isinstance(node.value, (str, int))):
-        return str(node.value)
+        return repr(node.value) if within_call and isinstance(node.value, str) else str(node.value)
     if isinstance(node, ast.Tuple):
-        parts = [key_of(element) for element in node.elts]
+        parts = [key_of(element, within_call) for element in node.elts]
         return None if None in parts else "(" + ", ".join(parts) + ")"
     if isinstance(node, ast.Call) and (callee := dotted(node.func)) is not None:
-        parts = [key_of(argument) for argument in node.args]
-        named = [(keyword.arg, key_of(keyword.value)) for keyword in node.keywords]
+        parts = [key_of(argument, True) for argument in node.args]
+        named = [(keyword.arg, key_of(keyword.value, True)) for keyword in node.keywords]
         if None in parts or any(name is None or value is None for name, value in named):
             return None
         return f"{callee}(" + ", ".join([*parts, *(f"{name}={value}" for name, value in named)]) + ")"
     return dotted(node)
+
+
+def constructed(node):
+    """Whether a registry key holds an object's construction (a call), which no string key is, though one
+    may read as it."""
+    return any(isinstance(part, ast.Call) for part in ast.walk(node))
 
 
 def entries(value):
@@ -348,12 +355,14 @@ class Facts(ast.NodeVisitor):
             self.use(root, node.lineno)
 
     def registry(self, name, found):
-        """Each entry of a registry literal, by its key's text; one whose key is computed is listed with no
-        name, never dropped, so a set holding it is seen to be unread there."""
+        """Each entry of a registry literal, by its key's text and whether it is constructed; one whose key is
+        computed is listed unnamed, never dropped, so a set holding it is seen to be unread there."""
         if found is not None:
             listed = self.registries.setdefault(name, [])
             for key, line in found:
-                listed.append({"key": key_of(key) or "", "line": line})
+                text = key_of(key)
+                listed.append({"key": text or "", "named": text is not None, "constructed": constructed(key),
+                               "line": line})
 
     def visit_Assign(self, node):
         if len(self.frames) == 1:

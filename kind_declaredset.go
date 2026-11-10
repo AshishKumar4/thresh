@@ -39,17 +39,17 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 		before := map[string]bool{}
 		unnamedBefore := 0
 		for _, e := range was {
-			if e.name == "" {
+			if !e.named {
 				unnamedBefore++
 			} else if in(e) {
-				before[e.name] = true
+				before[e.identity()] = true
 			}
 		}
 		// A registry entry whose key the program computes cannot be named, so the set cannot be compared at
 		// it: more of them than before is said, never passed over.
 		var unnamed []string
 		for _, e := range now {
-			if e.name == "" {
+			if !e.named {
 				unnamed = append(unnamed, fmt.Sprint(e.line))
 			}
 		}
@@ -60,18 +60,24 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 		}
 		after := map[string]bool{}
 		for _, e := range now {
-			if e.name == "" || !in(e) {
+			if !e.named || !in(e) {
 				continue
 			}
-			after[e.name] = true
-			if _, declared := s.Declared[e.name]; !declared && !before[e.name] {
+			after[e.identity()] = true
+			if _, declared := s.Declared[e.name]; !declared && !before[e.identity()] {
 				out = append(out, signal{Kind: s.Kind, Seam: name, File: f.Path, Level: "step-back",
 					Message: fmt.Sprintf("undeclared element added: %s (line %d). This set is intentional — declare why it belongs here, or it may not.",
 						e.name, e.line)})
 			}
 		}
 		for _, d := range sortedKeys(s.Declared) {
-			if before[d] && !after[d] {
+			plain, built := element{name: d}.identity(), element{name: d, constructed: true}.identity()
+			// A declaration names one entry: a string and a constructed key that read alike are two.
+			if after[plain] && after[built] && !(before[plain] && before[built]) {
+				out = append(out, signal{Kind: s.Kind, Seam: name, File: f.Path, Level: "step-back",
+					Message: fmt.Sprintf("declared element %s names two entries, a string and a constructed key that reads as it; one is undeclared.", d)})
+			}
+			if (before[plain] || before[built]) && !(after[plain] || after[built]) {
 				out = append(out, signal{Kind: s.Kind, Seam: name, File: f.Path, Level: "note",
 					Message: fmt.Sprintf("declared element %s no longer exists. Remove it from the declared set (did its rule move elsewhere?).", d)})
 			}
@@ -81,8 +87,19 @@ func (declaredSet) assess(name string, s seam, cs *changeset) []signal {
 }
 
 type element struct {
-	name string
-	line int
+	name        string
+	line        int
+	named       bool // false: a registry key the program computes, which has no name
+	constructed bool // a registry key that constructs an object: never the string that reads as it
+}
+
+// identity is what a set compares an element by: its name, and for a registry key whether it is constructed,
+// so a string that reads as a constructed key is another key.
+func (e element) identity() string {
+	if e.constructed {
+		return "constructed:" + e.name
+	}
+	return e.name
 }
 
 // The element extractors return a source's elements and whether it was read: a
@@ -91,7 +108,7 @@ type element struct {
 func goFuncElements(src string) ([]element, bool) {
 	var out []element
 	for _, fn := range goFuncs(src) {
-		out = append(out, element{fn.Name, fn.Line})
+		out = append(out, element{name: fn.Name, line: fn.Line, named: true})
 	}
 	return out, true
 }
@@ -99,7 +116,7 @@ func goFuncElements(src string) ([]element, bool) {
 func cueDefElements(src string) ([]element, bool) {
 	var out []element
 	for _, d := range cueDefLabels(src) {
-		out = append(out, element{d.Name, d.Line})
+		out = append(out, element{name: d.Name, line: d.Line, named: true})
 	}
 	return out, true
 }

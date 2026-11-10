@@ -32,8 +32,10 @@ type pyUse struct {
 }
 
 type pyEntry struct {
-	Key  string `json:"key"`
-	Line int    `json:"line"`
+	Key         string `json:"key"`
+	Named       bool   `json:"named"`       // false: a key the program computes, which has no name
+	Constructed bool   `json:"constructed"` // its key constructs an object, never the string that reads as it
+	Line        int    `json:"line"`
 }
 
 type pyFile struct {
@@ -290,7 +292,7 @@ func pyFuncElements(src string) ([]element, bool) {
 	}
 	var out []element
 	for _, fn := range f.Funcs {
-		out = append(out, element{fn.Name, fn.Line})
+		out = append(out, element{name: fn.Name, line: fn.Line, named: true})
 	}
 	return out, true
 }
@@ -305,7 +307,7 @@ func pyRegistryElements(name string) func(string) ([]element, bool) {
 		}
 		var out []element
 		for _, e := range f.Registries[name] {
-			out = append(out, element{e.Key, e.Line})
+			out = append(out, element{name: e.Key, line: e.Line, named: e.Named, constructed: e.Constructed})
 		}
 		return out, true
 	}
